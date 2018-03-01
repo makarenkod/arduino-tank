@@ -154,6 +154,9 @@ class TankState {
 };
 
 class Command {
+  public:
+    static const char COMMAND_SEPARATOR = ';';
+
   private:
     String code;
     String description;
@@ -172,6 +175,7 @@ class Command {
     void    apply(TankState& state) const { action(state); }
 };
 
+Command nopCommand = Command("",  "NOP",              [](TankState& s) {});
 Command commands[] = {
   Command("5", "Stop",             [](TankState& s) {s.stop();}),
   Command("6", "Rotate right",     [](TankState& s) {s.leftMotor(50);s.rightMotor(0);}),
@@ -189,61 +193,56 @@ class IO {
       Serial.begin(9600);
     }
 
-    bool getCommand(Command& command) {
-      bool commandAvailable = false;
-
+    Command getCommand() {
       while(Serial.available())
       {
         char commandCodeChar = Serial.read();
 
-        if (commandCodeChar == ';') {
-          commandAvailable = parseCommand(partialCommandCode, command);
+        if (commandCodeChar == Command::COMMAND_SEPARATOR) {
+          return parseCommand(partialCommandCode);
         }
         else {
           partialCommandCode += String(commandCodeChar);
         }
       }
 
-      return commandAvailable;
+      return nopCommand;
     }
 
-    void log(String message) {
-      Serial.println(message)
+    void log(String message = "") {
+      Serial.println(message);
+    }
+
+  private:
+    Command parseCommand(String commandCode){
+      for(unsigned int i; i < sizeof(commands)/sizeof(commands[0]); i++) {
+        const Command& currentCommand =  commands[i];
+        if(commandCode == currentCommand.getCode()) {
+          return currentCommand;
+        }
+      }
+
+      return nopCommand;
     }
 };
 
 TankState state;
+IO io;
 
 void setup() {
-  commandsPrompt(commands);
-}
+  io.init();
 
-void loop()
-{
-  while(Serial.available())
-  {
-    char commandCode = Serial.read();
-
-    for(unsigned int i; i < sizeof(commands)/sizeof(commands[0]); i++) {
-      const Command& command =  commands[i];
-      if( commandCode == command.getCode()[0]) {
-        command.apply(state);
-        break;
-      }
-    }
-
-    state.sync();
-  }
-}
-
-void commandsPrompt(Command commands[]) {
-  Serial.begin(9600);
-  Serial.println(">");
+  io.log(">");
 
   for(unsigned int i; i < sizeof(commands)/sizeof(commands[0]); i++) {
     const Command& command =  commands[i];
-    Serial.println(command.getCode() + " " + command.getDescription());
+    io.log(command.getCode() + " " + command.getDescription());
   }
 
-  Serial.println();
+  io.log();
+}
+
+void loop(){
+  io.getCommand().apply(state);
+  state.sync();
 }
