@@ -1,4 +1,109 @@
-class LED {
+// CS 
+// Hall sensors
+// Bluetooth
+// Animation
+// Logariphmic brightness
+
+class Animation {
+private:
+  unsigned long startTimeMillis;
+
+public:
+  Animation(unsigned long startTimeMillis) { 
+    this->startTimeMillis = startTimeMillis;
+  }
+
+  int calcValue(unsigned long timeMillis) {
+    return 0;
+  }
+
+protected:
+  unsigned long getStartTime() { return startTimeMillis; }
+};
+
+class ConstValue: public Animation {
+private:
+  int value;
+  
+public:
+  ConstValue(unsigned long startTimeMillis, int value)
+    : Animation(startTimeMillis) {
+    this->value = value;  
+  }
+
+  int calcValue(unsigned long timeMillis) {
+    return value;
+  }
+};
+
+class LinearAnimation: public Animation {
+private:
+  int startValue;
+  int endValue; 
+  int durationMillis;
+  
+public:
+  LinearAnimation(unsigned long startTimeMillis, int startValue, int endValue, int durationMillis): Animation(startTimeMillis) {
+    this->startValue = startValue;
+    this->endValue = endValue; 
+    this->durationMillis = durationMillis;
+  }
+
+  int calcValue(unsigned long timeMillis) {
+    int value = startValue;
+    unsigned long startTimeMillis = getStartTime();
+    
+    if (timeMillis >= startTimeMillis && timeMillis < startTimeMillis + durationMillis) {
+      value = startValue + (timeMillis - startTimeMillis) * (endValue - startValue)/ durationMillis;
+    }
+    else if (timeMillis >= startTimeMillis + durationMillis){
+      value = endValue;
+    }
+    
+    return value;
+  }
+};
+
+class Animatable {
+protected:
+  Animatable() {
+    this -> pAnimation = new ConstValue(now(), 0);
+  }
+  
+  virtual void setValue(int value) = 0;  
+
+public:
+  virtual int  getValue() const  = 0;
+
+  void setValueNow(int newValue){
+    delete this -> pAnimation;
+    this -> pAnimation = new ConstValue(now(), newValue);
+  }
+
+  void animateLinearly(int newValue, int durationMillis){
+    delete this-> pAnimation;
+    this->pAnimation = new LinearAnimation(now(), getValue(), newValue, durationMillis);
+  }
+
+  void animateMeander(int minValue, int maxValue, int periodMillis, int offsetMillis){
+  }
+
+  void stopAnimation() {
+    setValueNow(getValue());
+  }
+
+private:
+  void sync() {
+    setValue(pAnimation->calcValue(now()));
+  }
+  
+  unsigned long now() { millis(); }
+  
+private:
+  Animation* pAnimation;
+};
+
+class LED: public Animatable {
   private:
     int pin;
     int brightness;
@@ -11,16 +116,17 @@ class LED {
       init();
     }
 
-    // Speed, [-99..0..99]. 0 means the motor is stopped
-    void setBrightness(int brightness){
-      this->brightness = brightness > 99 ? 99 : (brightness < -99 ? -99 : brightness);
-    }
-
-    int getBrightness() const { return this->brightness; }
-
     void sync() {
       int brightness = this->brightness * 255 / 99;
       analogWrite(pin, brightness);
+    }
+
+    int getValue() const { return this->brightness; }
+
+  protected:
+    // Speed, [-99..0..99]. 0 means the motor is stopped
+    void setValue(int brightness){
+      this->brightness = brightness > 99 ? 99 : (brightness < -99 ? -99 : brightness);
     }
 
   private:
@@ -29,7 +135,7 @@ class LED {
     }
 };
 
-class Motor {
+class Motor: public Animatable {
   private:
     int pinInA;
     int pinInB;
@@ -50,13 +156,6 @@ class Motor {
       init();
     }
 
-    // Speed, [-99..0..99]. 0 means the motor is stopped
-    void setSpeed(int speed){
-      this->speed = speed > 99 ? 99 : (speed < -99 ? -99 : speed);
-    }
-
-    int getSpeed() const { return this->speed; }
-
     void sync() {
       int pwm = this->speed * 255 / 99;
 
@@ -74,6 +173,14 @@ class Motor {
       }
 
       analogWrite(pinPwm, pwm);
+    }
+
+    int getValue() const { return this->speed; }
+
+  protected:
+    // Speed, [-99..0..99]. 0 means the motor is stopped
+    void setValue(int speed){
+      this->speed = speed > 99 ? 99 : (speed < -99 ? -99 : speed);
     }
 
   private:
@@ -123,40 +230,37 @@ class TankState {
       ledRightRear.sync();
 
       Serial.println(
-        "Motor(L=" + String(motorLeft.getSpeed()) + "," +
-              "R=" + String(motorRight.getSpeed()) +
+        "Motor(L=" + String(motorLeft.getValue()) + "," +
+              "R=" + String(motorRight.getValue()) +
         ")"
       );
       Serial.println(
-        "LED(LF=" + String(ledLeftFront.getBrightness()) + "," +
-            "RF=" + String(ledRightFront.getBrightness()) + "," +
-            "LR=" + String(ledLeftRear.getBrightness()) + "," +
-            "RR=" + String(ledRightRear.getBrightness()) + "," +
+        "LED(LF=" + String(ledLeftFront.getValue()) + "," +
+            "RF=" + String(ledRightFront.getValue()) + "," +
+            "LR=" + String(ledLeftRear.getValue()) + "," +
+            "RR=" + String(ledRightRear.getValue()) + "," +
         ")"
       );
     }
 
     void stop()
     {
-      motorLeft.setSpeed(0);
-      motorRight.setSpeed(0);
+      motorLeft.setValueNow(0);
+      motorRight.setValueNow(0);
     }
 
     // speed [-99..99]
     void leftMotor(int speed) {
-      motorLeft.setSpeed(speed);
+      motorLeft.setValueNow(speed);
     }
 
     void rightMotor(int speed) {
-      motorRight.setSpeed(speed);
+      motorRight.setValueNow(speed);
     }
 
 };
 
 class Command {
-  public:
-    static const char COMMAND_SEPARATOR = ';';
-
   private:
     String code;
     String description;
@@ -175,8 +279,69 @@ class Command {
     void    apply(TankState& state) const { action(state); }
 };
 
-Command nopCommand = Command("",  "NOP",              [](TankState& s) {});
-Command commands[] = {
+class IO {
+  public:
+    void init(){
+      Serial.begin(9600);
+    }
+
+    String getData(int maxLength, char stopChar) const {
+      String data;
+      int length = 0;
+      
+      while((data.length() < maxLength) && Serial.available()) {
+        char ch = Serial.read();
+        if (stopChar == ch) break;
+        data += String(Serial.read());
+      }
+
+      return data;
+    }
+    
+    void log(String message = "") {
+      Serial.println(message);
+    }
+};
+
+class Commands {
+private:
+  static Command nopCommand;
+  static Command commands[];
+  
+public:
+  const Command& NOP() { return nopCommand; }
+
+  const Command& findByCode(String commandCode) {
+    for(unsigned int i; i < numCommands(); i++) {
+      const Command& currentCommand =  commands[i];
+      if(commandCode == currentCommand.getCode()) {
+        return currentCommand;
+      }
+    }
+    
+    return NOP();
+  }
+
+  String commandDescriptions() const {
+    String description;
+    for(unsigned int i; i < numCommands(); i++) {
+      const Command& command =  commands[i];
+      description += command.getCode() + " " + command.getDescription();
+
+      if (i < numCommands() - 1) {
+        description += "\n";
+      }
+    }
+
+    return description;
+  }
+
+  int numCommands() const;
+};
+
+Command Commands::nopCommand = Command("", "NOP", [](TankState& s) {});
+
+Command Commands::commands[] = {
   Command("5", "Stop",             [](TankState& s) {s.stop();}),
   Command("6", "Rotate right",     [](TankState& s) {s.leftMotor(50);s.rightMotor(0);}),
   Command("4", "Rotate left",      [](TankState& s) {s.leftMotor(0);s.rightMotor(50);}),
@@ -184,65 +349,36 @@ Command commands[] = {
   Command("2", "Slow backward",    [](TankState& s) {s.leftMotor(-25);s.rightMotor(-25);})
 };
 
-class IO {
+int Commands::numCommands() const { return sizeof(commands)/sizeof(commands[0]); } 
+
+class CommandListener {
   private:
     String partialCommandCode;
-
+    const IO& io;
+    static const char COMMAND_SEPARATOR = ';';
+    static const int MAX_COMMAND_LENGTH = 16;
+    
   public:
-    void init(){
-      Serial.begin(9600);
+    CommandListener(const IO& io): io(io) {
     }
 
-    Command getCommand() {
-      while(Serial.available())
-      {
-        char commandCodeChar = Serial.read();
-
-        if (commandCodeChar == Command::COMMAND_SEPARATOR) {
-          return parseCommand(partialCommandCode);
-        }
-        else {
-          partialCommandCode += String(commandCodeChar);
-        }
-      }
-
-      return nopCommand;
-    }
-
-    void log(String message = "") {
-      Serial.println(message);
-    }
-
-  private:
-    Command parseCommand(String commandCode){
-      for(unsigned int i; i < sizeof(commands)/sizeof(commands[0]); i++) {
-        const Command& currentCommand =  commands[i];
-        if(commandCode == currentCommand.getCode()) {
-          return currentCommand;
-        }
-      }
-
-      return nopCommand;
+    String maybeCommand() {
+      return io.getData(MAX_COMMAND_LENGTH, COMMAND_SEPARATOR);
     }
 };
 
 TankState state;
 IO io;
+CommandListener listener = CommandListener(io);
+Commands commands;
 
 void setup() {
   io.init();
-
+  io.log(commands.commandDescriptions());
   io.log(">");
-
-  for(unsigned int i; i < sizeof(commands)/sizeof(commands[0]); i++) {
-    const Command& command =  commands[i];
-    io.log(command.getCode() + " " + command.getDescription());
-  }
-
-  io.log();
 }
 
 void loop(){
-  io.getCommand().apply(state);
+  commands.findByCode(listener.maybeCommand()).apply(state);
   state.sync();
 }
