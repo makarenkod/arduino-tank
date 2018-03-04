@@ -64,6 +64,15 @@ public:
   }
 };
 
+struct Range { // minValue <= value <= maxValue
+  int minValue;
+  int maxValue;
+
+  int fit(int value) {
+    return value > maxValue ? maxValue : (value < minValue ? minValue : value);
+  }
+};
+
 class Animatable {
 protected:
   Animatable() {
@@ -71,7 +80,8 @@ protected:
   }
   
   virtual void setValue(int value) = 0;  
-
+  virtual Range getRange() const = 0;
+  
 public:
   virtual int  getValue() const  = 0;
 
@@ -117,22 +127,38 @@ class LED: public Animatable {
     }
 
     void sync() {
-      int brightness = this->brightness * 255 / 99;
-      analogWrite(pin, brightness);
+      analogWrite(pin, calcLogValue(brightness));
     }
 
     int getValue() const { return this->brightness; }
+    virtual Range getRange() const { 
+      // Brightness, [0..99]. 0 means off, 99 - full
+      return Range{ .minValue = 0, .maxValue = 99}; 
+    };
 
   protected:
-    // Speed, [-99..0..99]. 0 means the motor is stopped
     void setValue(int brightness){
-      this->brightness = brightness > 99 ? 99 : (brightness < -99 ? -99 : brightness);
+      this->brightness = getRange().fit(brightness);
     }
 
   private:
     void init(){
        pinMode(pin, OUTPUT);
     }
+
+public:
+    int calcLogValue(int value) {
+      return pow (2, (value / logFactor)) - 1;
+    }
+    
+    float calcLogFactor() {
+      Range range = getRange();
+      return (range.maxValue * log10(2))/(log10(maxLedValue + 1));  
+    }
+  
+  private:
+    const float logFactor = calcLogFactor();
+    const int maxLedValue = 255;
 };
 
 class Motor: public Animatable {
@@ -157,7 +183,7 @@ class Motor: public Animatable {
     }
 
     void sync() {
-      int pwm = this->speed * 255 / 99;
+      int pwm = this->speed * 255 / getRange().maxValue;
 
       if( pwm == 0) {
         digitalWrite(pinInA, LOW);
@@ -176,11 +202,12 @@ class Motor: public Animatable {
     }
 
     int getValue() const { return this->speed; }
+    virtual Range getRange() const { return Range{.minValue = -99, .maxValue = 99}; };
 
   protected:
     // Speed, [-99..0..99]. 0 means the motor is stopped
     void setValue(int speed){
-      this->speed = speed > 99 ? 99 : (speed < -99 ? -99 : speed);
+      this->speed = getRange().fit(speed);
     }
 
   private:
