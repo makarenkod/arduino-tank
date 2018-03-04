@@ -1,15 +1,14 @@
-// CS 
+// CS
 // Hall sensors
 // Bluetooth
-// Animation
-// Logariphmic brightness
+// Complex Animation
 
 class Animation {
 private:
   unsigned long startTimeMillis;
 
 public:
-  Animation(unsigned long startTimeMillis) { 
+  Animation(unsigned long startTimeMillis) {
     this->startTimeMillis = startTimeMillis;
   }
 
@@ -24,11 +23,11 @@ protected:
 class ConstValue: public Animation {
 private:
   int value;
-  
+
 public:
   ConstValue(unsigned long startTimeMillis, int value)
     : Animation(startTimeMillis) {
-    this->value = value;  
+    this->value = value;
   }
 
   int calcValue(unsigned long timeMillis) {
@@ -39,27 +38,27 @@ public:
 class LinearAnimation: public Animation {
 private:
   int startValue;
-  int endValue; 
+  int endValue;
   int durationMillis;
-  
+
 public:
   LinearAnimation(unsigned long startTimeMillis, int startValue, int endValue, int durationMillis): Animation(startTimeMillis) {
     this->startValue = startValue;
-    this->endValue = endValue; 
+    this->endValue = endValue;
     this->durationMillis = durationMillis;
   }
 
   int calcValue(unsigned long timeMillis) {
     int value = startValue;
     unsigned long startTimeMillis = getStartTime();
-    
+
     if (timeMillis >= startTimeMillis && timeMillis < startTimeMillis + durationMillis) {
       value = startValue + (timeMillis - startTimeMillis) * (endValue - startValue)/ durationMillis;
     }
     else if (timeMillis >= startTimeMillis + durationMillis){
       value = endValue;
     }
-    
+
     return value;
   }
 };
@@ -78,10 +77,10 @@ protected:
   Animatable() {
     this -> pAnimation = new ConstValue(now(), 0);
   }
-  
-  virtual void setValue(int value) = 0;  
+
+  virtual void setValue(int value) = 0;
   virtual Range getRange() const = 0;
-  
+
 public:
   virtual int  getValue() const  = 0;
 
@@ -106,9 +105,9 @@ private:
   void sync() {
     setValue(pAnimation->calcValue(now()));
   }
-  
+
   unsigned long now() { millis(); }
-  
+
 private:
   Animation* pAnimation;
 };
@@ -131,9 +130,9 @@ class LED: public Animatable {
     }
 
     int getValue() const { return this->brightness; }
-    virtual Range getRange() const { 
+    virtual Range getRange() const {
       // Brightness, [0..99]. 0 means off, 99 - full
-      return Range{ .minValue = 0, .maxValue = 99}; 
+      return Range{ .minValue = 0, .maxValue = 99};
     };
 
   protected:
@@ -150,12 +149,12 @@ public:
     int calcLogValue(int value) {
       return pow (2, (value / logFactor)) - 1;
     }
-    
+
     float calcLogFactor() {
       Range range = getRange();
-      return (range.maxValue * log10(2))/(log10(maxLedValue + 1));  
+      return (range.maxValue * log10(2))/(log10(maxLedValue + 1));
     }
-  
+
   private:
     const float logFactor = calcLogFactor();
     const int maxLedValue = 255;
@@ -315,7 +314,7 @@ class IO {
     String getData(int maxLength, char stopChar) const {
       String data;
       int length = 0;
-      
+
       while((data.length() < maxLength) && Serial.available()) {
         char ch = Serial.read();
         if (stopChar == ch) break;
@@ -324,7 +323,7 @@ class IO {
 
       return data;
     }
-    
+
     void log(String message = "") {
       Serial.println(message);
     }
@@ -334,7 +333,7 @@ class Commands {
 private:
   static Command nopCommand;
   static Command commands[];
-  
+
 public:
   const Command& NOP() { return nopCommand; }
 
@@ -345,7 +344,7 @@ public:
         return currentCommand;
       }
     }
-    
+
     return NOP();
   }
 
@@ -376,7 +375,7 @@ Command Commands::commands[] = {
   Command("2", "Slow backward",    [](TankState& s) {s.leftMotor(-25);s.rightMotor(-25);})
 };
 
-int Commands::numCommands() const { return sizeof(commands)/sizeof(commands[0]); } 
+int Commands::numCommands() const { return sizeof(commands)/sizeof(commands[0]); }
 
 class CommandListener {
   private:
@@ -384,7 +383,7 @@ class CommandListener {
     const IO& io;
     static const char COMMAND_SEPARATOR = ';';
     static const int MAX_COMMAND_LENGTH = 16;
-    
+
   public:
     CommandListener(const IO& io): io(io) {
     }
