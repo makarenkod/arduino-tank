@@ -6,19 +6,18 @@
 
 class Animation {
 private:
-  unsigned long startTimeMillis;
+  long startTimeMillis;
 
 public:
-  Animation(unsigned long startTimeMillis) {
+  Animation(long startTimeMillis) {
     this->startTimeMillis = startTimeMillis;
   }
 
-  int calcValue(unsigned long timeMillis) {
-    return 0;
-  }
+  virtual ~Animation() {}
+  virtual int calcValue(long timeMillis) = 0;
 
 protected:
-  unsigned long getStartTime() { return startTimeMillis; }
+  long getStartTime() { return startTimeMillis; }
 };
 
 class ConstValue: public Animation {
@@ -31,7 +30,7 @@ public:
     this->value = value;
   }
 
-  int calcValue(unsigned long timeMillis) {
+  int calcValue(long timeMillis) override {
     return value;
   }
 };
@@ -49,11 +48,11 @@ public:
     this->durationMillis = durationMillis;
   }
 
-  int calcValue(unsigned long timeMillis) {
+  int calcValue(long timeMillis) override {
     int value = startValue;
-    unsigned long startTimeMillis = getStartTime();
+    long startTimeMillis = getStartTime();
 
-    if (timeMillis >= startTimeMillis && timeMillis < startTimeMillis + durationMillis) {
+    if ((timeMillis >= startTimeMillis) && (timeMillis < startTimeMillis + durationMillis)) {
       value = startValue + (timeMillis - startTimeMillis) * (endValue - startValue)/ durationMillis;
     }
     else if (timeMillis >= startTimeMillis + durationMillis){
@@ -69,48 +68,47 @@ struct Range { // minValue <= value <= maxValue
   int maxValue;
 
   int fit(int value) {
-    return value > maxValue ? maxValue : (value < minValue ? minValue : value);
+    return value >= maxValue ? maxValue : (value <= minValue ? minValue : value);
   }
 };
 
 class Animatable {
+  private:
+    Animation* pAnimation;
+  protected:
+    Animatable() {
+      pAnimation = new ConstValue(now(), 0);
+    }
+  
+    virtual void setValue(int value) = 0;
+    virtual Range getRange() const = 0;
+  public:
+    virtual int  getValue() const  = 0;
+
+    void setValueNow(int newValue){
+      delete pAnimation;
+      pAnimation = new ConstValue(now(), newValue);
+    }
+  
+    void animateLinearly(int newValue, int durationMillis){
+      delete this-> pAnimation;
+      this->pAnimation = new LinearAnimation(now(), getValue(), newValue, durationMillis);
+    }
+  
+    void animateMeander(int minValue, int maxValue, int periodMillis, int offsetMillis){
+    }
+  
+    void stopAnimation() {
+      setValueNow(getValue());
+    }
+
 protected:
-  Animatable() {
-    this -> pAnimation = new ConstValue(now(), 0);
-  }
-
-  virtual void setValue(int value) = 0;
-  virtual Range getRange() const = 0;
-
-public:
-  virtual int  getValue() const  = 0;
-
-  void setValueNow(int newValue){
-    delete this -> pAnimation;
-    this -> pAnimation = new ConstValue(now(), newValue);
-  }
-
-  void animateLinearly(int newValue, int durationMillis){
-    delete this-> pAnimation;
-    this->pAnimation = new LinearAnimation(now(), getValue(), newValue, durationMillis);
-  }
-
-  void animateMeander(int minValue, int maxValue, int periodMillis, int offsetMillis){
-  }
-
-  void stopAnimation() {
-    setValueNow(getValue());
-  }
-
-private:
-  void sync() {
+  virtual void sync() {
     setValue(pAnimation->calcValue(now()));
   }
 
-  unsigned long now() { millis(); }
-
 private:
-  Animation* pAnimation;
+  long now() { return long(millis()); }
 };
 
 class LED: public Animatable {
@@ -127,10 +125,11 @@ class LED: public Animatable {
     }
 
     void sync() {
-      analogWrite(pin, calcLogValue(brightness));
+      Animatable::sync();
+      analogWrite(pin, calcLogValue(getValue()));
     }
 
-    int getValue() const { return this->brightness; }
+    int getValue() const { return brightness; }
     virtual Range getRange() const {
       // Brightness, [0..99]. 0 means off, 99 - full
       return Range{ .minValue = 0, .maxValue = 99};
@@ -151,14 +150,14 @@ public:
       return pow (2, (value / logFactor)) - 1;
     }
 
-    float calcLogFactor() {
+    float calcLogFactor(int maxValue) {
       Range range = getRange();
-      return (range.maxValue * log10(2))/(log10(maxLedValue + 1));
+      return (range.maxValue * log10(2))/(log10(maxValue + 1));
     }
 
   private:
-    const float logFactor = calcLogFactor();
     const int maxLedValue = 255;
+    const float logFactor = calcLogFactor(maxLedValue);
 };
 
 class Motor: public Animatable {
@@ -183,8 +182,8 @@ class Motor: public Animatable {
     }
 
     void sync() {
-      int pwm = this->speed * 255 / getRange().maxValue;
-
+      Animatable::sync();
+      int pwm = speed * 255 / getRange().maxValue;
       if( pwm == 0) {
         digitalWrite(pinInA, LOW);
         digitalWrite(pinInB, LOW);
@@ -201,7 +200,7 @@ class Motor: public Animatable {
       analogWrite(pinPwm, pwm);
     }
 
-    int getValue() const { return this->speed; }
+    int getValue() const { return speed; }
     virtual Range getRange() const { return Range{.minValue = -99, .maxValue = 99}; };
 
   protected:
@@ -239,7 +238,8 @@ class TankState {
     const int MOTOR_2_CS_PIN = A4;  // A4
     const int MOTOR_2_EN_PIN = A6;  // A6
 
-  private:
+  // private:
+  public:
     Motor motorLeft     = Motor(MOTOR_1_INA_PIN, MOTOR_1_INB_PIN, MOTOR_1_PWM_PIN, MOTOR_1_CS_PIN, MOTOR_1_EN_PIN);
     Motor motorRight    = Motor(MOTOR_2_INA_PIN, MOTOR_2_INB_PIN, MOTOR_2_PWM_PIN, MOTOR_2_CS_PIN, MOTOR_2_EN_PIN);
     LED   ledLeftFront  = LED(FRONT_LEFT_LED_PIN);
@@ -255,12 +255,14 @@ class TankState {
       ledRightFront.sync();
       ledLeftRear.sync();
       ledRightRear.sync();
-
+/*
       Serial.println(
         "Motor(L=" + String(motorLeft.getValue()) + "," +
               "R=" + String(motorRight.getValue()) +
         ")"
       );
+*/
+/*      
       Serial.println(
         "LED(LF=" + String(ledLeftFront.getValue()) + "," +
             "RF=" + String(ledRightFront.getValue()) + "," +
@@ -268,6 +270,7 @@ class TankState {
             "RR=" + String(ledRightRear.getValue()) + "," +
         ")"
       );
+*/
     }
 
     void stop()
@@ -285,6 +288,14 @@ class TankState {
       motorRight.setValueNow(speed);
     }
 
+    void lights(boolean on) {
+      int value = on ? 99 : 0;
+      int duration = 1000;
+      ledLeftFront.animateLinearly(value, duration);
+      ledRightFront.animateLinearly(value, duration);
+      ledLeftRear.animateLinearly(value, duration);
+      ledRightRear.animateLinearly(value, duration);
+    }
 };
 
 class Command {
@@ -307,22 +318,27 @@ class Command {
 };
 
 class IO {
+  private:
+       String data;
   public:
     void init(){
       Serial.begin(9600);
     }
 
-    String getData(int maxLength, char stopChar) const {
-      String data;
-      int length = 0;
-
+    String getData(unsigned int maxLength, char stopChar) {
+      String commandCode;
+      
       while((data.length() < maxLength) && Serial.available()) {
         char ch = Serial.read();
-        if (stopChar == ch) break;
-        data += String(Serial.read());
+        if (stopChar == ch) {
+          commandCode = data;
+          data = "";
+          break;
+        }
+        data += String(ch);
       }
 
-      return data;
+      return commandCode;
     }
 
     void log(String message = "") {
@@ -339,7 +355,7 @@ public:
   const Command& NOP() { return nopCommand; }
 
   const Command& findByCode(String commandCode) {
-    for(unsigned int i; i < numCommands(); i++) {
+    for(unsigned int i = 0; i < numCommands(); i++) {
       const Command& currentCommand =  commands[i];
       if(commandCode == currentCommand.getCode()) {
         return currentCommand;
@@ -351,7 +367,7 @@ public:
 
   String commandDescriptions() const {
     String description;
-    for(unsigned int i; i < numCommands(); i++) {
+    for(unsigned int i = 0; i < numCommands(); i++) {
       const Command& command =  commands[i];
       description += command.getCode() + " " + command.getDescription();
 
@@ -363,7 +379,7 @@ public:
     return description;
   }
 
-  int numCommands() const;
+  unsigned int numCommands() const;
 };
 
 Command Commands::nopCommand = Command("", "NOP", [](TankState& s) {});
@@ -373,20 +389,22 @@ Command Commands::commands[] = {
   Command("6", "Rotate right",     [](TankState& s) {s.leftMotor(50);s.rightMotor(0);}),
   Command("4", "Rotate left",      [](TankState& s) {s.leftMotor(0);s.rightMotor(50);}),
   Command("8", "Full forward",     [](TankState& s) {s.leftMotor(99); s.rightMotor(99);}),
-  Command("2", "Slow backward",    [](TankState& s) {s.leftMotor(-25);s.rightMotor(-25);})
+  Command("2", "Slow backward",    [](TankState& s) {s.leftMotor(-25);s.rightMotor(-25);}),
+  Command("L", "Lights up",        [](TankState& s) {s.lights(true);}),
+  Command("O", "Lights down",      [](TankState& s) {s.lights(false);})
 };
 
-int Commands::numCommands() const { return sizeof(commands)/sizeof(commands[0]); }
+unsigned int Commands::numCommands() const { return sizeof(commands)/sizeof(commands[0]); }
 
 class CommandListener {
   private:
     String partialCommandCode;
-    const IO& io;
+    IO& io;
     static const char COMMAND_SEPARATOR = ';';
-    static const int MAX_COMMAND_LENGTH = 16;
+    static const unsigned int MAX_COMMAND_LENGTH = 16;
 
   public:
-    CommandListener(const IO& io): io(io) {
+    CommandListener(IO& io): io(io) {
     }
 
     String maybeCommand() {
@@ -406,6 +424,11 @@ void setup() {
 }
 
 void loop(){
-  commands.findByCode(listener.maybeCommand()).apply(state);
+  String commandCode = listener.maybeCommand();
+  if(commandCode.length() > 0) {
+    Command command = commands.findByCode(commandCode);
+    command.apply(state);
+  }
+
   state.sync();
 }
