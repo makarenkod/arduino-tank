@@ -13,6 +13,11 @@ struct Range { // minValue <= value <= maxValue
   }
 };
 
+class Device {
+  virtual void init() = 0;
+  virtual void sync() = 0;
+};
+
 class Animation {
 private:
   long startTimeMillis;
@@ -96,7 +101,7 @@ class BlinkingAnimation: public Animation {
     int calcValue(long timeMillis) override {
       long phase = (timeMillis - getStartTime()) % periodMillis;
       int value = range.minValue;
-      
+
       if (periodMillis < phase * dutyCycle / periodMillis / 100) {
         value = range.maxValue;
       }
@@ -151,7 +156,7 @@ private:
   long now() { return long(millis()); }
 };
 
-class LED: public Animatable {
+class LED: public Animatable, public Device {
   private:
     int pin;
     int brightness;
@@ -160,8 +165,6 @@ class LED: public Animatable {
     LED(int pin) {
       this->pin = pin;
       this->brightness = 0;
-
-      init();
     }
 
     virtual void sync() {
@@ -180,12 +183,12 @@ class LED: public Animatable {
       this->brightness = getRange().fit(brightness);
     }
 
-  private:
-    void init(){
+  public:
+    virtual void init(){
        pinMode(pin, OUTPUT);
     }
 
-public:
+  public:
     int calcLogValue(int value) {
       return pow (2, (value / logFactor)) - 1;
     }
@@ -200,7 +203,7 @@ public:
     const float logFactor = calcLogFactor(maxLedValue);
 };
 
-class Motor: public Animatable {
+class Motor: public Animatable, public Device {
   private:
     int pinInA;
     int pinInB;
@@ -241,14 +244,19 @@ class Motor: public Animatable {
       this->speed = getRange().fit(speed);
     }
 
-  private:
-    void init() {
+  public:
+    virtual void init() {
       pinMode(pinInA, OUTPUT);
       pinMode(pinInB, OUTPUT);
       pinMode(pinPwm, OUTPUT);
       pinMode(pinCS,  OUTPUT);
       pinMode(pinEN,  INPUT_PULLUP);
     }
+};
+
+class HallSensor: public Device {
+  virtual void init() {}
+  virtual void sync() {}
 };
 
 class TankState {
@@ -277,16 +285,22 @@ private:
     LED   ledRightFront = LED(FRONT_RIGHT_LED_PIN);
     LED   ledLeftRear   = LED(REAR_LEFT_LED_PIN);
     LED   ledRightRear  = LED(REAR_RIGHT_LED_PIN);
+    Device&[] devices = {motorLeft, motorRight, ledLeftFront, ledRightFront, ledLeftRear, ledRightRear};
     boolean showStatus  = false;
 
   public:
+    void init() {
+      for(int i = 0; i < sizeof(Device)/sizeof(Device[0]); i++){
+        Device& device = Device[i];
+        device.init();
+      }
+    }
+
     void sync() {
-      motorLeft.sync();
-      motorRight.sync();
-      ledLeftFront.sync();
-      ledRightFront.sync();
-      ledLeftRear.sync();
-      ledRightRear.sync();
+      for(int i = 0; i < sizeof(Device)/sizeof(Device[0]); i++){
+        Device& device = Device[i];
+        device.sync();
+      }
 
       if (showStatus) {
         showStatus = false;
