@@ -94,14 +94,11 @@ class BlinkingAnimation: public Animation {
     }
 
     int calcValue(long timeMillis) override {
-      int value = startValue;
       long phase = (timeMillis - getStartTime()) % periodMillis;
-
+      int value = range.minValue;
+      
       if (periodMillis < phase * dutyCycle / periodMillis / 100) {
         value = range.maxValue;
-      }
-      else {
-        value = range.minValue;
       }
 
       return value;
@@ -449,9 +446,9 @@ Command Commands::commands[] = {
   Command("8", "Full forward",     [](TankState& s) {s.leftMotor(99); s.rightMotor(99);}),
   Command("2", "Slow backward",    [](TankState& s) {s.leftMotor(-25);s.rightMotor(-25);}),
   Command("L", "Lights up",        [](TankState& s) {s.lights(true);}),
-  Command("O", "Lights down",      [](TankState& s) {s.lights(false);})
-  Command("BR", "Blink right",     [](TankState& s) {s.blinkRight();})
-  Command("BL", "Blink left",      [](TankState& s) {s.blinkLeft();})
+  Command("O", "Lights down",      [](TankState& s) {s.lights(false);}),
+  Command("BR", "Blink right",     [](TankState& s) {s.blinkRight();}),
+  Command("BL", "Blink left",      [](TankState& s) {s.blinkLeft();}),
   Command("S", "Status",           [](TankState& s) {s.status();})
 };
 
