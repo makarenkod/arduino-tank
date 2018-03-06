@@ -4,6 +4,15 @@
 // Complex Animation
 //
 
+struct Range { // minValue <= value <= maxValue
+  int minValue;
+  int maxValue;
+
+  int fit(int value) {
+    return value >= maxValue ? maxValue : (value <= minValue ? minValue : value);
+  }
+};
+
 class Animation {
 private:
   long startTimeMillis;
@@ -36,40 +45,67 @@ public:
 };
 
 class LinearAnimation: public Animation {
-private:
-  int startValue;
-  int endValue;
-  int durationMillis;
+  private:
+    int startValue;
+    int endValue;
+    int durationMillis;
 
-public:
-  LinearAnimation(unsigned long startTimeMillis, int startValue, int endValue, int durationMillis): Animation(startTimeMillis) {
-    this->startValue = startValue;
-    this->endValue = endValue;
-    this->durationMillis = durationMillis;
-  }
-
-  int calcValue(long timeMillis) override {
-    int value = startValue;
-    long startTimeMillis = getStartTime();
-
-    if ((timeMillis >= startTimeMillis) && (timeMillis < startTimeMillis + durationMillis)) {
-      value = startValue + (timeMillis - startTimeMillis) * (endValue - startValue)/ durationMillis;
-    }
-    else if (timeMillis >= startTimeMillis + durationMillis){
-      value = endValue;
+  public:
+    LinearAnimation(unsigned long startTimeMillis, int startValue, int endValue, int durationMillis): Animation(startTimeMillis) {
+      this->startValue = startValue;
+      this->endValue = endValue;
+      this->durationMillis = durationMillis;
     }
 
-    return value;
-  }
+    int calcValue(long timeMillis) override {
+      int value = startValue;
+      long startTimeMillis = getStartTime();
+
+      if ((timeMillis >= startTimeMillis) && (timeMillis < startTimeMillis + durationMillis)) {
+        value = startValue + (timeMillis - startTimeMillis) * (endValue - startValue)/ durationMillis;
+      }
+      else if (timeMillis >= startTimeMillis + durationMillis){
+        value = endValue;
+      }
+
+      return value;
+    }
 };
 
-struct Range { // minValue <= value <= maxValue
-  int minValue;
-  int maxValue;
+class BlinkingAnimation: public Animation {
+  private:
+    const Range& range;
+    int periodMillis;
+    int dutyCycle;
 
-  int fit(int value) {
-    return value >= maxValue ? maxValue : (value <= minValue ? minValue : value);
-  }
+  public:
+    BlinkingAnimation(
+      unsigned long startTimeMillis,
+      const Range& range,
+      int periodMillis,
+      int dutyCycle = 50
+    )
+      : Animation(startTimeMillis), range(range) {
+
+      this->periodMillis = periodMillis;
+
+      Range dutyCycleRange = Range{ .minValue = 0, .maxValue = 100};
+      this->dutyCycle = dutyCycleRange.fit(dutyCycle);
+    }
+
+    int calcValue(long timeMillis) override {
+      int value = startValue;
+      long phase = (timeMillis - getStartTime()) % periodMillis;
+
+      if (periodMillis < phase * dutyCycle / periodMillis / 100) {
+        value = range.maxValue;
+      }
+      else {
+        value = range.minValue;
+      }
+
+      return value;
+    }
 };
 
 class Animatable {
@@ -100,8 +136,9 @@ class Animatable {
       pAnimation = new LinearAnimation(now(), getValue(), newValue, durationMillis);
     }
 
-    void animateMeander(int minValue, int maxValue, int periodMillis, int offsetMillis){
-      // TODO
+    void animateMeander(int periodMillis, int dutyCycle){
+      delete pAnimation;
+      pAnimation = new BlinkingAnimation(now(), getRange(), periodMillis, dutyCycle);
     }
 
     void stopAnimation() {
@@ -296,6 +333,24 @@ private:
       ledRightRear.animateLinearly(value, duration);
     }
 
+    void blinkRight() {
+        int periodMillis = 1000;
+        int dutyCycle = 50;
+        ledRightFront.animateMeander(periodMillis, dutyCycle);
+        ledRightRear.animateMeander(periodMillis, dutyCycle);
+        ledLeftFront.setValueNow(0);
+        ledLeftRear.setValueNow(0);
+    }
+
+    void blinkLeft() {
+      int periodMillis = 1000;
+      int dutyCycle = 50;
+      ledLeftFront.animateMeander(periodMillis, dutyCycle);
+      ledLeftRear.animateMeander(periodMillis, dutyCycle);
+      ledRightFront.setValueNow(0);
+      ledRightRear.setValueNow(0);
+    }
+
     void status() {
       showStatus = true;
     }
@@ -395,31 +450,19 @@ Command Commands::commands[] = {
   Command("2", "Slow backward",    [](TankState& s) {s.leftMotor(-25);s.rightMotor(-25);}),
   Command("L", "Lights up",        [](TankState& s) {s.lights(true);}),
   Command("O", "Lights down",      [](TankState& s) {s.lights(false);})
+  Command("BR", "Blink right",     [](TankState& s) {s.blinkRight();})
+  Command("BL", "Blink left",      [](TankState& s) {s.blinkLeft();})
   Command("S", "Status",           [](TankState& s) {s.status();})
 };
 
 unsigned int Commands::numCommands() const { return sizeof(commands)/sizeof(commands[0]); }
 
-class CommandListener {
-  private:
-    String partialCommandCode;
-    IO& io;
-    static const char COMMAND_SEPARATOR = ';';
-    static const unsigned int MAX_COMMAND_LENGTH = 16;
-
-  public:
-    CommandListener(IO& io): io(io) {}
-
-    String maybeCommand() {
-      return io.getData(MAX_COMMAND_LENGTH, COMMAND_SEPARATOR);
-    }
-};
-
 TankState state;
 IO io;
-CommandListener listener = CommandListener(io);
 Commands commands;
 String prompt = "Enter a command, followed by semicolon >";
+static const char COMMAND_SEPARATOR = ';';
+static const unsigned int MAX_COMMAND_LENGTH = 16;
 
 void setup() {
   io.init();
@@ -428,7 +471,7 @@ void setup() {
 }
 
 void loop(){
-  String commandCode = listener.maybeCommand();
+  String commandCode = io.getData(MAX_COMMAND_LENGTH, COMMAND_SEPARATOR);
   if(commandCode.length() > 0) {
     Command command = commands.findByCode(commandCode);
     command.apply(state);
