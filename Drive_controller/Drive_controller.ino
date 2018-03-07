@@ -14,8 +14,9 @@ struct Range { // minValue <= value <= maxValue
 };
 
 class Device {
-  virtual void init() = 0;
-  virtual void sync() = 0;
+  public:
+    virtual void init() = 0;
+    virtual void sync() = 0;
 };
 
 class Animation {
@@ -285,21 +286,21 @@ private:
     LED   ledRightFront = LED(FRONT_RIGHT_LED_PIN);
     LED   ledLeftRear   = LED(REAR_LEFT_LED_PIN);
     LED   ledRightRear  = LED(REAR_RIGHT_LED_PIN);
-    Device&[] devices = {motorLeft, motorRight, ledLeftFront, ledRightFront, ledLeftRear, ledRightRear};
+    Device* devices[6] = {&motorLeft, &motorRight, &ledLeftFront, &ledRightFront, &ledLeftRear, &ledRightRear};
     boolean showStatus  = false;
 
   public:
     void init() {
-      for(int i = 0; i < sizeof(Device)/sizeof(Device[0]); i++){
-        Device& device = Device[i];
-        device.init();
+      for(unsigned int i = 0; i < sizeof(devices)/sizeof(devices[0]); i++){
+        Device* pDevice = devices[i];
+        pDevice->init();
       }
     }
 
     void sync() {
-      for(int i = 0; i < sizeof(Device)/sizeof(Device[0]); i++){
-        Device& device = Device[i];
-        device.sync();
+      for(unsigned int i = 0; i < sizeof(devices)/sizeof(devices[0]); i++){
+        Device* pDevice = devices[i];
+        pDevice->sync();
       }
 
       if (showStatus) {
