@@ -80,19 +80,20 @@ class LinearAnimation: public Animation {
 
 class BlinkingAnimation: public Animation {
   private:
-    const Range& range;
-    int periodMillis;
-    int dutyCycle;
+    Range range;
+    unsigned long periodMillis;
+    unsigned long dutyCycle;
 
   public:
     BlinkingAnimation(
       unsigned long startTimeMillis,
       const Range& range,
-      int periodMillis,
-      int dutyCycle = 50
+      unsigned long periodMillis,
+      unsigned long dutyCycle = 50
     )
-      : Animation(startTimeMillis), range(range) {
+      : Animation(startTimeMillis) {
 
+      this->range = range;
       this->periodMillis = periodMillis;
 
       Range dutyCycleRange = Range{ .minValue = 0, .maxValue = 100};
@@ -100,10 +101,10 @@ class BlinkingAnimation: public Animation {
     }
 
     int calcValue(long timeMillis) override {
-      long phase = (timeMillis - getStartTime()) % periodMillis;
+      unsigned long phase = (timeMillis - getStartTime()) % periodMillis;
       int value = range.minValue;
 
-      if (periodMillis < phase * dutyCycle / periodMillis / 100) {
+      if (phase < (periodMillis * dutyCycle) / 100l) {
         value = range.maxValue;
       }
 
