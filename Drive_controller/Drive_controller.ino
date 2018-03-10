@@ -13,10 +13,30 @@ struct Range { // minValue <= value <= maxValue
   }
 };
 
+class Utils {
+  public:
+    static long now() { return long(millis()); }
+};
+
 class Device {
+  private:
+    long lastSyncTimeMillis;
+
+  protected:
+    Device(){
+      lastSyncTimeMillis = 0;
+    }
+
   public:
     virtual void init() = 0;
-    virtual void sync() = 0;
+    void sync(long now){
+        lastSyncTimeMillis = now;
+        onSync(lastSyncTimeMillis);
+    }
+
+    virtual String state() { return ""; }
+  protected:
+    virtual void onSync(long now);
 };
 
 class Animation {
@@ -117,7 +137,7 @@ class Animatable {
     Animation* pAnimation;
   protected:
     Animatable() {
-      pAnimation = new ConstValue(now(), 0);
+      pAnimation = new ConstValue(Utils::now(), 0);
     }
 
     virtual ~Animatable(){
@@ -132,17 +152,17 @@ class Animatable {
 
     void setValueNow(int newValue){
       delete pAnimation;
-      pAnimation = new ConstValue(now(), newValue);
+      pAnimation = new ConstValue(Utils::now(), newValue);
     }
 
     void animateLinearly(int newValue, int durationMillis){
       delete pAnimation;
-      pAnimation = new LinearAnimation(now(), getValue(), newValue, durationMillis);
+      pAnimation = new LinearAnimation(Utils::now(), getValue(), newValue, durationMillis);
     }
 
     void animateMeander(int periodMillis, int dutyCycle){
       delete pAnimation;
-      pAnimation = new BlinkingAnimation(now(), getRange(), periodMillis, dutyCycle);
+      pAnimation = new BlinkingAnimation(Utils::now(), getRange(), periodMillis, dutyCycle);
     }
 
     void stopAnimation() {
@@ -150,12 +170,9 @@ class Animatable {
     }
 
 protected:
-  virtual void sync() {
-    setValue(pAnimation->calcValue(now()));
+  virtual void onSync(long now) {
+    setValue(pAnimation->calcValue(now));
   }
-
-private:
-  long now() { return long(millis()); }
 };
 
 class LED: public Animatable, public Device {
@@ -169,8 +186,8 @@ class LED: public Animatable, public Device {
       this->brightness = 0;
     }
 
-    virtual void sync() {
-      Animatable::sync();
+    virtual void onSync(long now) {
+      Animatable::onSync(now);
       analogWrite(pin, calcLogValue(getValue()));
     }
 
@@ -213,6 +230,8 @@ class Motor: public Animatable, public Device {
     int pinCS;
     int pinEN;
     int speed;
+    boolean error;
+    int current;
 
   public:
     Motor(int pinInA, int pinInB, int pinPwm, int pinCS, int pinEN) {
@@ -222,12 +241,16 @@ class Motor: public Animatable, public Device {
       this->pinCS = pinCS;
       this->pinEN = pinEN;
       this->speed = 0;
-
-      init();
+      this->error = false;
+      this->current = 0;
     }
 
-    virtual void sync() {
-      Animatable::sync();
+    virtual void onSync(long now) {
+      Animatable::onSync(now);
+
+      error = LOW == digitalRead(pinEN);
+      current = analogRead(pinCS);
+
       int pwm = speed * 255 / getRange().maxValue;
 
       digitalWrite(pinInA, pwm < 0 ? HIGH : LOW);
@@ -240,6 +263,19 @@ class Motor: public Animatable, public Device {
       return Range{.minValue = -99, .maxValue = 99};
     }
 
+    virtual String state() {
+      return String(error ? "ERR" : "OK") + ";" + "I" + String(current) + ";";
+    }
+
+    boolean isError() const {
+        return error;
+    }
+
+    void cleanError() {
+        error = false;
+    }
+
+
   protected:
     // Speed, [-99..0..99]. 0 means the motor is stopped
     virtual void setValue(int speed){
@@ -251,14 +287,14 @@ class Motor: public Animatable, public Device {
       pinMode(pinInA, OUTPUT);
       pinMode(pinInB, OUTPUT);
       pinMode(pinPwm, OUTPUT);
-      pinMode(pinCS,  OUTPUT);
+      pinMode(pinCS,  INPUT_PULLUP); // !!! may need external pull-up resistor
       pinMode(pinEN,  INPUT_PULLUP);
     }
 };
 
 class HallSensor: public Device {
   virtual void init() {}
-  virtual void sync() {}
+  virtual void onSync(long now) {}
 };
 
 class TankState {
@@ -298,10 +334,15 @@ private:
       }
     }
 
-    void sync() {
+    void sync(long now) {
       for(unsigned int i = 0; i < sizeof(devices)/sizeof(devices[0]); i++){
         Device* pDevice = devices[i];
-        pDevice->sync();
+        pDevice->sync(now);
+      }
+
+      if (motorLeft.isError() || motorRight.isError()) {
+        stop();
+        blinkError();
       }
 
       if (showStatus) {
@@ -362,6 +403,20 @@ private:
       ledLeftRear.animateMeander(periodMillis, dutyCycle);
       ledRightFront.setValueNow(0);
       ledRightRear.setValueNow(0);
+    }
+
+    void blinkError() {
+        int periodMillis = 500;
+        int dutyCycle = 50;
+        ledRightFront.animateMeander(periodMillis, dutyCycle);
+        ledRightRear.animateMeander(periodMillis, dutyCycle);
+        ledLeftFront.animateMeander(periodMillis, dutyCycle);
+        ledLeftRear.animateMeander(periodMillis, dutyCycle);
+    }
+
+    void recover() {
+      motorLeft.cleanError();
+      motorRight.cleanError();
     }
 
     void status() {
@@ -465,7 +520,8 @@ Command Commands::commands[] = {
   Command("O", "Lights down",      [](TankState& s) {s.lights(false);}),
   Command("BR", "Blink right",     [](TankState& s) {s.blinkRight();}),
   Command("BL", "Blink left",      [](TankState& s) {s.blinkLeft();}),
-  Command("S", "Status",           [](TankState& s) {s.status();})
+  Command("R",  "Recover",         [](TankState& s) {s.recover();}),
+  Command("S",  "Status",          [](TankState& s) {s.status();})
 };
 
 unsigned int Commands::numCommands() const { return sizeof(commands)/sizeof(commands[0]); }
@@ -478,6 +534,7 @@ static const char COMMAND_SEPARATOR = ';';
 static const unsigned int MAX_COMMAND_LENGTH = 16;
 
 void setup() {
+  state.init();
   io.init();
   io.log(commands.commandDescriptions());
   io.log(prompt);
@@ -485,13 +542,15 @@ void setup() {
 
 void loop(){
   String commandCode = io.getData(MAX_COMMAND_LENGTH, COMMAND_SEPARATOR);
+  long now = Utils::now();
+
   if(commandCode.length() > 0) {
     Command command = commands.findByCode(commandCode);
     command.apply(state);
-    state.sync();
+    state.sync(now);
     io.log(prompt);
   }
   else {
-    state.sync();
+    state.sync(now);
   }
 }
