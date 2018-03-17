@@ -13,7 +13,20 @@ struct Range { // minValue <= value <= maxValue
   }
 };
 
+class Utils {
+  public:
+    static long now() { return long(millis()); }
+};
+
 class Device {
+  private:
+    long lastSyncTimeMillis;
+
+  protected:
+    Device(){
+      lastSyncTimeMillis = 0;
+    }
+
   public:
     virtual void init() = 0;
     virtual void sync() = 0;
@@ -213,6 +226,8 @@ class Motor: public Animatable, public Device {
     int pinCS;
     int pinEN;
     int speed;
+    boolean error;
+    int current;
 
   public:
     Motor(int pinInA, int pinInB, int pinPwm, int pinCS, int pinEN) {
@@ -222,8 +237,8 @@ class Motor: public Animatable, public Device {
       this->pinCS = pinCS;
       this->pinEN = pinEN;
       this->speed = 0;
-
-      init();
+      this->error = false;
+      this->current = 0;
     }
 
     virtual void sync() {
@@ -239,6 +254,19 @@ class Motor: public Animatable, public Device {
     virtual Range getRange() const {
       return Range{.minValue = -99, .maxValue = 99};
     }
+
+    virtual String state() {
+      return String(error ? "ERR" : "OK") + ";" + "I" + String(current) + ";";
+    }
+
+    boolean isError() const {
+        return error;
+    }
+
+    void cleanError() {
+        error = false;
+    }
+
 
   protected:
     // Speed, [-99..0..99]. 0 means the motor is stopped
@@ -364,6 +392,20 @@ private:
       ledRightRear.setValueNow(0);
     }
 
+    void blinkError() {
+        int periodMillis = 500;
+        int dutyCycle = 50;
+        ledRightFront.animateMeander(periodMillis, dutyCycle);
+        ledRightRear.animateMeander(periodMillis, dutyCycle);
+        ledLeftFront.animateMeander(periodMillis, dutyCycle);
+        ledLeftRear.animateMeander(periodMillis, dutyCycle);
+    }
+
+    void recover() {
+      motorLeft.cleanError();
+      motorRight.cleanError();
+    }
+
     void status() {
       showStatus = true;
     }
@@ -465,7 +507,9 @@ Command Commands::commands[] = {
   Command("O", "Lights down",      [](TankState& s) {s.lights(false);}),
   Command("BR", "Blink right",     [](TankState& s) {s.blinkRight();}),
   Command("BL", "Blink left",      [](TankState& s) {s.blinkLeft();}),
-  Command("S", "Status",           [](TankState& s) {s.status();})
+  Command("E",  "Blink error",     [](TankState& s) {s.blinkError();}),
+  Command("R",  "Recover",         [](TankState& s) {s.recover();}),
+  Command("S",  "Status",          [](TankState& s) {s.status();})
 };
 
 unsigned int Commands::numCommands() const { return sizeof(commands)/sizeof(commands[0]); }
@@ -478,6 +522,7 @@ static const char COMMAND_SEPARATOR = ';';
 static const unsigned int MAX_COMMAND_LENGTH = 16;
 
 void setup() {
+  state.init();
   io.init();
   io.log(commands.commandDescriptions());
   io.log(prompt);
@@ -485,7 +530,10 @@ void setup() {
 
 void loop(){
   String commandCode = io.getData(MAX_COMMAND_LENGTH, COMMAND_SEPARATOR);
+  long now = Utils::now();
+
   if(commandCode.length() > 0) {
+    commandCode.toUpperCase();
     Command command = commands.findByCode(commandCode);
     command.apply(state);
     state.sync();
