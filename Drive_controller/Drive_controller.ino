@@ -28,8 +28,16 @@ class Device {
     }
 
   public:
-    virtual void init() = 0;
-    virtual void sync() = 0;
+    virtual void init() { }
+
+    void sync(long now){
+        lastSyncTimeMillis = now;
+        onSync(lastSyncTimeMillis);
+    }
+
+    virtual String state() { return ""; }
+  protected:
+    virtual void onSync(long now){ }
 };
 
 class Animation {
@@ -163,8 +171,8 @@ class Animatable {
     }
 
 protected:
-  virtual void sync() {
-    setValue(pAnimation->calcValue(Utils::now()));
+  virtual void onSync(long now) {
+    setValue(pAnimation->calcValue(now));
   }
 };
 
@@ -179,8 +187,8 @@ class LED: public Animatable, public Device {
       this->brightness = 0;
     }
 
-    virtual void sync() {
-      Animatable::sync();
+    virtual void onSync(long now) {
+      Animatable::onSync(now);
       analogWrite(pin, calcLogValue(getValue()));
     }
 
@@ -238,8 +246,8 @@ class Motor: public Animatable, public Device {
       this->current = 0;
     }
 
-    virtual void sync() {
-      Animatable::sync();
+    virtual void onSync(long now) {
+      Animatable::onSync(now);
 
       error = LOW == digitalRead(pinEN);
       current = analogRead(pinCS);
@@ -314,10 +322,6 @@ class HallSensor: public Device {
     }
 
   protected:
-    virtual void sync() {
-      onSync(Utils::now());
-    }
-    
     virtual void onSync(long now) {
        if (now > lastTimeMillis + updatePeriodMillis) {
          detachInterrupt(pin);
@@ -401,11 +405,16 @@ class TankState {
       }
     }
 
-    void sync() {
+    void sync(long now) {
       for(unsigned int i = 0; i < sizeof(devices)/sizeof(devices[0]); i++){
         Device* pDevice = devices[i];
-        pDevice->sync();
+        pDevice->sync(now);
       }
+
+      // if (motorLeft.isError() || motorRight.isError()) {
+      //  stop();
+      //  blinkError();
+      // }
 
       if (showStatus) {
         showStatus = false;
@@ -611,10 +620,10 @@ void loop(){
     commandCode.toUpperCase();
     Command command = commands.findByCode(commandCode);
     command.apply(state);
-    state.sync();
+    state.sync(now);
     io.log(prompt);
   }
   else {
-    state.sync();
+    state.sync(now);
   }
 }
