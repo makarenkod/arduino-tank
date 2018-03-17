@@ -265,7 +265,7 @@ class Motor: public Animatable, public Device {
     }
 
     virtual String state() {
-      return String(error ? "ERR" : "OK") + ";" + "I" + String(current) + ";" + "S" + String(getValue());
+      return String(error ? "ERR" : "OK") + ";" + "I" + String(current) + ";";
     }
 
     boolean isError() const {
@@ -293,7 +293,27 @@ class Motor: public Animatable, public Device {
     }
 };
 
-class HallSensor: public Device {
+/*
+volatile byte half_revolutions;
+ unsigned int rpm;
+ unsigned long timeold;
+ void setup()
+ {
+   rpm = 0;
+   timeold = 0;
+ }
+ void loop()
+ {
+   if (half_revolutions >= 20) { 
+     //Update RPM every 20 counts, increase this for better RPM resolution,
+     //decrease for faster update
+     rpm = 30*1000/(millis() - timeold)*half_revolutions;
+     timeold = millis();
+     half_revolutions = 0;
+   }
+ }
+*/
+ class HallSensor: public Device {
   private:
     int pin;
     int id;
@@ -419,8 +439,8 @@ class TankState {
       if (showStatus) {
         showStatus = false;
         Serial.println(
-          "Motor(L=" + motorLeft.state() + "," +
-                "R=" + motorRight.state() +
+          "Motor(L=" + String(motorLeft.getValue()) + "," +
+                "R=" + String(motorRight.getValue()) +
           ")"
         );
 
